@@ -1,0 +1,11 @@
+{
+  "name": "starry-sky",
+  "owner": { "name": "therealclvn" },
+  "plugins": [
+    {
+      "name": "starry-sky",
+      "source": "./",
+      "description": "Cosmos theme for the Claude desktop app: a ringed planet shows your context and usage limits at a glance"
+    }
+  ]
+}
