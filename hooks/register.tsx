@@ -42,7 +42,8 @@ const LOOK: ThemeSetArgs = {
 }
 
 const meter = atom({ plugin: 'starry-sky', key: 'meter' } as const, null)
-const tasks = atom({ plugin: 'starry-sky', key: 'tasks' } as const, [] as BgTask[])
+// 加上 shape 標籤：換標籤時舊資料一律當作空的，順便清掉之前漏接結束通知而累積的星星。
+const tasks = atom({ plugin: 'starry-sky', key: 'tasks' } as const, [] as BgTask[], { shape: 'tasks-2' })
 
 // ── 場景 ──
 // 構圖靠右上對齊（xMaxYMin slice）：視窗變窄時裁左邊，變寬時裁底部，右側的用量永遠看得到。
@@ -68,7 +69,7 @@ const STATIC = (() => {
     const x = Math.round(r() * W)
     const y = Math.round(r() * H)
     // 右側用量區留白。
-    if (x > 1200 && y < 840) continue
+    if (x > 1200 && y < 900) continue
     const big = r() < 0.22
     const size = big ? 2.2 + r() * 1.2 : 1.1 + r() * 0.8
     const delay = (r() * 9).toFixed(1)
@@ -85,16 +86,16 @@ const STATIC = (() => {
 
 // 右側一顆行星儀表，不用文字，數值都是連續的：
 // 本體盈缺 = context（用掉越多，陰影越大）
-// 繞行衛星 = 5 小時額度（軌道上看得到的那段弧，上端 0%、下端 100%）
-// 行星環發光的長度 = 7 天額度（左後方 0%，經過前方，到右後方 100%；7 個刻度代表 7 天）
+// 繞行衛星 = 5 小時額度（從行星左上方出發，經過最上端、行星前方、最下端，繞回行星右下方是 100%；5 個點代表 5 小時）
+// 行星環發光的長度 = 7 天額度（從左後方出發，經過前方，到右後方是 100%；7 個點代表 7 天）
 const P: Pt = [1410, 370]
 const PR = 96
 const RING = { rx: 168, ry: 40, tilt: -22 }
 // 軌道幾乎直立，放進對話欄右邊那條窄而高的空白。
 const ORBIT = { rx: 290, ry: 70, tilt: -72 }
-// 量表只用看得到的那段弧（約 70–75%），缺口落在被行星擋住的地方，起點和終點分得開。
-const ORBIT_GAUGE = { start: 315, span: 270, dir: 1 }
-const RING_GAUGE = { start: 218, span: 256, dir: -1 }
+// 量表的缺口放在被行星擋住的那段（環的正後方），其餘幾乎整圈都用：點和軌跡不會出現在行星背後。
+const ORBIT_GAUGE = { start: 288, span: 324, dir: 1 }
+const RING_GAUGE = { start: 205, span: 230, dir: -1 }
 
 function level(p: number): string {
   if (p >= 85) return 'hot'
@@ -157,6 +158,22 @@ function trail(d: string, v: number, lv: string, width: number): string {
     .join('')
 }
 
+// 額度環的刻度：5 小時軌道 5 個點（一點一小時），7 天行星環 7 個點（一點一天）。
+// 點放在每一段的終點（5 個點在 20、40、60、80、100%，100% 就是量表終點）；用量走過的會亮起。
+function gaugeTicks(rx: number, ry: number, g: { start: number; span: number; dir: number }, v: number | null, lv: string, steps: number): string {
+  const out: string[] = []
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const p = t * 100
+    const [x, y] = ellipseAt(rx, ry, g.start, g.dir, t, g.span)
+    const isMajor = steps <= 10 || i % (steps / 4) === 0
+    const isPassed = v !== null && v >= p - 0.001
+    const r = (isMajor ? 3.2 : 1.9) + (isPassed ? 0.6 : 0)
+    out.push(`<circle class="${isPassed ? `tick-on ${lv}` : 'dim'}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}"/>`)
+  }
+  return out.join('')
+}
+
 function planet(m: Meter | null): string {
   const [cx, cy] = P
   const ctx = clampPct(m?.contextPercent ?? null)
@@ -202,37 +219,27 @@ ${shade}
   const ringD = ellipsePath(RING.rx, RING.ry, 180, -1)
   const ringFrontD = arcD(RING.rx, RING.ry, RING_GAUGE.start, RING_GAUGE.span, RING_GAUGE.dir)
   const wlv = week === null ? 'cool' : level(week)
-  const ringTicks = [1, 2, 3, 4, 5, 6, 7]
-    .map(i => {
-      const [x, y] = ellipseAt(RING.rx, RING.ry, RING_GAUGE.start, RING_GAUGE.dir, i / 7, RING_GAUGE.span)
-      const isPassed = week !== null && week / 100 >= i / 7
-      const depth = 1
-      return `<circle class="${isPassed ? `tick-on ${wlv}` : 'dim'}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${((isPassed ? 3.4 : 2.6) * depth).toFixed(1)}"/>`
-    })
-    .join('')
+  const ringTicks = gaugeTicks(RING.rx, RING.ry, RING_GAUGE, week, wlv, 7)
   const ringLayer = `<path class="ring-base" d="${ringD}"/><path class="ring-inner" d="${ellipsePath(RING.rx - 20, RING.ry - 5, 180, -1)}"/>`
-  // 量表軌跡與刻度不分前後、同樣粗細亮度，整段畫在最上層（這段弧本來就不會被行星擋住）。
-  const ringGauge = `<g class="gauge ring" transform="translate(${cx} ${cy}) rotate(${RING.tilt})"><path class="gauge-track" d="${ringFrontD}"/>${week === null || week === 0 ? '' : trail(ringFrontD, week, wlv, 6)}${ringTicks}</g>`
+  // 量表軌跡與刻度前後同樣粗細亮度，但後半畫在行星後面（被擋住），前半畫在行星前面。
+  const ringGaugeBody = `<path class="gauge-track" d="${ringFrontD}"/>${week === null || week === 0 ? '' : trail(ringFrontD, week, wlv, 6)}${ringTicks}`
+  const ringGauge = (clip: string) =>
+    `<g class="gauge ring" transform="translate(${cx} ${cy}) rotate(${RING.tilt})"><g clip-path="url(#${clip})">${ringGaugeBody}</g></g>`
   const ringG = (clip: string, side: string) =>
     `<g class="${side} ring" transform="translate(${cx} ${cy}) rotate(${RING.tilt})"><g clip-path="url(#${clip})">${ringLayer}</g></g>`
 
-  // ── 衛星（5 小時）：從正上方順時針；在前方時大而亮，繞到後方小而暗
+  // ── 衛星（5 小時）：從軌道最上端順時針；在前方時大而亮，繞到後方小而暗、被行星擋住
   const orbitD = arcD(ORBIT.rx, ORBIT.ry, ORBIT_GAUGE.start, ORBIT_GAUGE.span, ORBIT_GAUGE.dir)
   const slv = five === null ? 'cool' : level(five)
-  const orbitTicks = [1, 2, 3, 4, 5]
-    .map(i => {
-      const [x, y] = ellipseAt(ORBIT.rx, ORBIT.ry, ORBIT_GAUGE.start, ORBIT_GAUGE.dir, i / 5, ORBIT_GAUGE.span)
-      const isPassed = five !== null && five / 100 >= i / 5
-      const depth = 1
-      return `<circle class="${isPassed ? `tick-on ${slv}` : 'dim'}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${((isPassed ? 3.4 : 2.6) * depth).toFixed(1)}"/>`
-    })
-    .join('')
+  const orbitTicks = gaugeTicks(ORBIT.rx, ORBIT.ry, ORBIT_GAUGE, five, slv, 5)
   const orbitLayer = `<path class="track faint" d="${ellipsePath(ORBIT.rx, ORBIT.ry, 0, 1)}"/><path class="track" d="${orbitD}"/>`
-  const orbitGauge = `<g class="gauge orbit" transform="translate(${cx} ${cy}) rotate(${ORBIT.tilt})">${five === null || five === 0 ? '' : trail(orbitD, five, slv, 3)}${orbitTicks}</g>`
+  const orbitGaugeBody = `<path class="gauge-track" d="${orbitD}"/>${five === null || five === 0 ? '' : trail(orbitD, five, slv, 3)}${orbitTicks}`
+  const orbitGauge = (clip: string) =>
+    `<g class="gauge orbit" transform="translate(${cx} ${cy}) rotate(${ORBIT.tilt})"><g clip-path="url(#${clip})">${orbitGaugeBody}</g></g>`
   const orbitG = (clip: string, side: string) =>
     `<g class="${side} orbit" transform="translate(${cx} ${cy}) rotate(${ORBIT.tilt})"><g clip-path="url(#${clip})">${orbitLayer}</g></g>`
   let moonFront = ''
-  const moonBack = ''
+  let moonBack = ''
   if (five !== null) {
     const [mx, my] = ellipseAt(ORBIT.rx, ORBIT.ry, ORBIT_GAUGE.start, ORBIT_GAUGE.dir, five / 100, ORBIT_GAUGE.span)
     const depth = 0.7 + 0.45 * ((my / ORBIT.ry + 1) / 2)
@@ -244,8 +251,9 @@ ${shade}
 <circle cx="${X}" cy="${Y}" r="${r.toFixed(1)}" fill="url(#satBody)" transform="rotate(${-ORBIT.tilt} ${X} ${Y})"/>
 <circle class="sat-ring" cx="${X}" cy="${Y}" r="${(r + 4).toFixed(1)}"/>
 </g></g>`
-    // 衛星永遠畫在最上層，不會被行星擋住；繞到後方時只縮小變暗。
-    moonFront = sat
+    // 衛星繞到後方時會被行星擋住，並縮小變暗。
+    if (my < 0) moonBack = sat
+    else moonFront = sat
   }
 
   // 後半（上方，被行星擋住）與前半（下方，蓋在行星上）分兩次畫。
@@ -256,47 +264,74 @@ ${shade}
 
   return `${halves}
 ${orbitG('backHalf', 'back')}
+${orbitGauge('backHalf')}
 ${moonBack}
 ${ringG('backHalf', 'back')}
+${ringGauge('backHalf')}
 ${body}
 ${ringG('frontHalf', 'front')}
+${ringGauge('frontHalf')}
 ${orbitG('frontHalf', 'front')}
-${ringGauge}
-${orbitGauge}
+${orbitGauge('frontHalf')}
 ${moonFront}`
 }
 
-// 螺旋星系：兩條旋臂，整體壓扁傾斜後慢慢自轉。
+// 螺旋星系：一個實心的星系盤面。中央一大團亮白核心往外漸藍，
+// 盤面由大量沿緊密螺旋排列的短弧線和亮點組成（偏向兩條旋臂的走向），深色模式下弧線間有暗色縫隙。
+// 整體壓扁傾斜成斜看的圓盤，慢慢自轉；佔滿對話欄左邊那一大塊。
 const GALAXY = (() => {
   const r = rand(7)
+  const R = 330
+  const PITCH = 0.22 // 螺旋纏繞程度，越小越緊
+  const streaks: string[] = []
+  const darks: string[] = []
   const dots: string[] = []
-  const arms: string[] = []
-  for (let arm = 0; arm < 2; arm++) {
-    let d = ''
-    for (let i = 0; i <= 60; i++) {
-      const th = (i / 60) * Math.PI * 2.4 + arm * Math.PI
-      const rr = 8 + i * 2.1
-      const x = rr * Math.cos(th)
-      const y = rr * Math.sin(th)
-      d += `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)} `
-      if (i % 2 === 0) {
-        const jx = x + (r() - 0.5) * 10
-        const jy = y + (r() - 0.5) * 10
-        dots.push(`<circle cx="${jx.toFixed(1)}" cy="${jy.toFixed(1)}" r="${(0.8 + r() * 1.4).toFixed(1)}"/>`)
-      }
-    }
-    arms.push(`<path d="${d}"/>`)
+  const arcSeg = (rr: number, a0: number, da: number): string => {
+    const r2 = rr * (1 + PITCH * da * 0.35)
+    const x1 = rr * Math.cos(a0)
+    const y1 = rr * Math.sin(a0)
+    const x2 = r2 * Math.cos(a0 + da)
+    const y2 = r2 * Math.sin(a0 + da)
+    return `M${x1.toFixed(0)} ${y1.toFixed(0)}A${rr.toFixed(0)} ${rr.toFixed(0)} 0 0 1 ${x2.toFixed(0)} ${y2.toFixed(0)}`
   }
-  return `<g transform="translate(420 780) rotate(-24) scale(1 0.42)">
-<circle r="150" fill="url(#galaxyGlow)"/>
-<g class="spin"><g class="arms">${arms.join('')}</g><g class="gdots">${dots.join('')}</g></g>
-<circle r="16" fill="url(#galaxyCore)"/>
+  // 兩條旋臂的相位：在半徑 rr 處旋臂中心的角度。
+  const armAngle = (rr: number, arm: number) => Math.log(rr / 10) / PITCH + arm * Math.PI
+  for (let i = 0; i < 300; i++) {
+    const rr = 24 + Math.pow(r(), 0.75) * (R - 24)
+    const onArm = r() < 0.75
+    const a0 = onArm ? armAngle(rr, r() < 0.5 ? 0 : 1) + (r() + r() - 1) * 0.55 : r() * Math.PI * 2
+    const da = 0.12 + r() * 0.42
+    const roll = r()
+    const cls = rr < R * 0.35 ? (roll < 0.6 ? 'gs1' : 'gs3') : roll < 0.45 ? 'gs2' : roll < 0.8 ? 'gs1' : 'gs3'
+    const w = (1 + r() * 2.2) * (1.15 - (rr / R) * 0.5)
+    streaks.push(`<path class="${cls}" d="${arcSeg(rr, a0, da)}" stroke-width="${w.toFixed(1)}"/>`)
+  }
+  for (let i = 0; i < 50; i++) {
+    const rr = 40 + Math.pow(r(), 0.8) * (R - 40)
+    const a0 = armAngle(rr, r() < 0.5 ? 0 : 1) + Math.PI / 2 + (r() + r() - 1) * 0.5
+    darks.push(`<path d="${arcSeg(rr, a0, 0.15 + r() * 0.35)}" stroke-width="${(1.5 + r() * 2.5).toFixed(1)}"/>`)
+  }
+  for (let i = 0; i < 90; i++) {
+    const rr = 20 + Math.pow(r(), 0.7) * (R - 20)
+    const a = r() * Math.PI * 2
+    dots.push(`<circle cx="${(rr * Math.cos(a)).toFixed(0)}" cy="${(rr * Math.sin(a)).toFixed(0)}" r="${(0.6 + r() * 1.6).toFixed(1)}"/>`)
+  }
+  return `<g transform="translate(310 560) rotate(-32) scale(1 0.6)">
+<circle r="${R * 1.3}" fill="url(#galaxyGlow)"/>
+<circle r="${R * 1.02}" fill="url(#galaxyDisk)"/>
+<g class="spin">
+<g class="gdark">${darks.join('')}</g>
+<g class="gstreak">${streaks.join('')}</g>
+<g class="gdots">${dots.join('')}</g>
+</g>
+<circle r="${R * 0.42}" fill="url(#galaxyCore)"/>
+<circle r="${R * 0.1}" class="gnucleus"/>
 </g>`
 })()
 
 // 背景任務星：只有在有背景任務時才出現，一個任務一顆，在行星下方，位置由任務 ID 決定（範圍內隨機、之後不跳動）。
 // 剛開始的任務慢慢浮現，結束的任務慢慢淡出消失。顏色分種類：指令偏藍、子代理偏紫、監控偏青綠。
-const BG_AREA = { x0: 1250, x1: 1585, y0: 580, y1: 810 }
+const BG_AREA = { x0: 1240, x1: 1590, y0: 720, y1: 880 }
 const BG_FADE_IN_MS = 2000
 const BG_FADE_OUT_MS = 2400
 
@@ -391,10 +426,16 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 .sk0 { stop-color: #dfe3f7; }
 .sk1 { stop-color: #ebe4f5; }
 .sk2 { stop-color: #f6e9ec; }
-.arms { fill: none; stroke: #b9a6ee; stroke-width: 7; stroke-linecap: round; opacity: 0.35; }
-.gdots { fill: #ffffff; opacity: 0.9; }
-.gl0 { stop-color: #d9cdfb; }
-.gc0 { stop-color: #ffffff; }
+.gstreak path, .gdark path { fill: none; stroke-linecap: round; }
+.gs1 { stroke: #6f7fd6; opacity: 0.4; }
+.gs2 { stroke: #4f62c8; opacity: 0.36; }
+.gs3 { stroke: #a99be8; opacity: 0.36; }
+.gdark path { stroke: #2a2050; opacity: 0; }
+.gdots { fill: #5a62c8; opacity: 0.7; }
+.gnucleus { fill: url(#galaxyNucleus); }
+.gl0 { stop-color: #c4b4f6; }
+.gd0 { stop-color: #e6d9ff; }
+.gc0 { stop-color: #ffd79a; }
 .shoot { stroke: #ffffff; }
 @media (prefers-color-scheme: dark) {
   .bg.shell { fill: #e4ebff; }
@@ -416,15 +457,20 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
   .sk0 { stop-color: #02030a; }
   .sk1 { stop-color: #080b22; }
   .sk2 { stop-color: #120d2a; }
-  .arms { stroke: #8f7ce6; opacity: 0.4; }
-  .gl0 { stop-color: #6a54d0; }
+  .gs1 { stroke: #eef2ff; opacity: 0.4; }
+  .gs2 { stroke: #7fa2ff; opacity: 0.36; }
+  .gs3 { stroke: #c8c4ff; opacity: 0.32; }
+  .gdark path { stroke: #03020a; opacity: 0.3; }
+  .gdots { fill: #ffffff; opacity: 0.85; }
+  .gl0 { stop-color: #5a46c8; }
+  .gd0 { stop-color: #6c80e8; }
   .gc0 { stop-color: #fff3d8; }
 }
 .tw { animation: twinkle 8s ease-in-out infinite; }
 @keyframes twinkle { 0%, 100% { opacity: 0.95; } 50% { opacity: 0.45; } }
 @keyframes glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.75; } }
 @keyframes turn { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.spin { animation: turn 300s linear infinite; }
+.spin { animation: turn 420s linear infinite; }
 .neb { animation: drift 90s ease-in-out infinite alternate; }
 .neb2 { animation-duration: 120s; animation-direction: alternate-reverse; }
 @keyframes drift { from { transform: translate(-40px, 10px); } to { transform: translate(40px, -10px); } }
@@ -451,8 +497,10 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 <radialGradient id="pLimb" cx="0.5" cy="0.5" r="0.5"><stop offset="0.7" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#2a1420" stop-opacity="0.45"/></radialGradient>
 <radialGradient id="satBody" cx="0.7" cy="0.35" r="0.8"><stop offset="0" stop-color="#ffffff"/><stop offset="0.5" stop-color="#d9d6e6"/><stop offset="1" stop-color="#5d5f7e"/></radialGradient>
 <radialGradient id="pGlow"><stop offset="0.3" stop-color="#ffd9b8" stop-opacity="0.35"/><stop offset="1" stop-color="#ffd9b8" stop-opacity="0"/></radialGradient>
-<radialGradient id="galaxyGlow"><stop offset="0" class="gl0" stop-opacity="0.6"/><stop offset="1" class="gl0" stop-opacity="0"/></radialGradient>
-<radialGradient id="galaxyCore"><stop offset="0" class="gc0" stop-opacity="1"/><stop offset="1" class="gc0" stop-opacity="0"/></radialGradient>
+<radialGradient id="galaxyGlow"><stop offset="0" class="gl0" stop-opacity="0.55"/><stop offset="0.5" class="gl0" stop-opacity="0.18"/><stop offset="1" class="gl0" stop-opacity="0"/></radialGradient>
+<radialGradient id="galaxyDisk"><stop offset="0" class="gd0" stop-opacity="0.6"/><stop offset="0.45" class="gd0" stop-opacity="0.32"/><stop offset="0.8" class="gd0" stop-opacity="0.14"/><stop offset="1" class="gd0" stop-opacity="0"/></radialGradient>
+<radialGradient id="galaxyCore"><stop offset="0" class="gc0" stop-opacity="1"/><stop offset="0.25" class="gc0" stop-opacity="0.85"/><stop offset="0.6" class="gc0" stop-opacity="0.3"/><stop offset="1" class="gc0" stop-opacity="0"/></radialGradient>
+<radialGradient id="galaxyNucleus"><stop offset="0" stop-color="#ffffff" stop-opacity="1"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
 <radialGradient id="halo">
 <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
 <stop offset="0.35" stop-color="#dfe5ff" stop-opacity="0.18"/>
@@ -590,19 +638,35 @@ export const register: Register = on => {
 
   // 任務結束的通知：文字裡帶著任務 ID 和結束狀態。
   on('prompt.submit', async ($, e, next) => {
-    if (e.origin.kind === 'task-notification' && /<status>\s*(completed|failed|killed|stopped|timed?_?out|error)\s*<\/status>/i.test(e.text)) {
+    if (e.origin.kind === 'task-notification') {
+      // 通知裡提到的任務：指令和子代理一收到通知就算結束；監控會在執行中持續發通知，要看到結束字樣才算。
       const text = e.text
-      await endTasks($, t => text.includes(t.id))
+      const isEnd = /(completed|failed|killed|stopped|timed?[ _-]?out|error|exited|finished|cancel)/i.test(text)
+      await endTasks($, t => text.includes(t.id) && (t.kind !== 'monitor' || isEnd))
     }
     return next(e)
   }).catch(($, e, next) => next(e))
 
   // 保險：每回合結束時，拿子代理清單把已經結束的標記掉。
   on('turn.complete', async ($, e, next) => {
+    // 保險：子代理照清單對（已結束或清單裡沒有的就標記結束）；指令超過 3 小時、監控超過 1 小時還沒收到結束通知的也收掉。
     try {
+      const now = await $.clock.now()
       const agents = await $.agent.list()
-      const done = new Set(agents.filter(a => ['completed', 'failed', 'killed'].includes(a.status)).map(a => a.id))
-      await endTasks($, t => t.kind === 'agent' && done.has(t.id))
+      const running = agents.filter(a => !['completed', 'failed', 'killed'].includes(a.status))
+      const live = new Set(running.map(a => a.id))
+      // 還在跑、但沒被記到的子代理（例如重新載入前就開始的）補回來。
+      const known = new Set((await read($, tasks)).map(t => t.id))
+      for (const a of running) {
+        if (!known.has(a.id) && a.kind === 'local_agent') {
+          await addTask($, a.id, 'agent')
+        }
+      }
+      await endTasks($, t =>
+        (t.kind === 'agent' && !live.has(t.id)) ||
+        (t.kind === 'shell' && now - t.startedAt > 3 * 3600 * 1000) ||
+        (t.kind === 'monitor' && now - t.startedAt > 3600 * 1000),
+      )
     } catch {
       // 拿不到清單就算了。
     }

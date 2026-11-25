@@ -5,13 +5,13 @@ A cosmos theme for Claude Code in the Claude desktop app (Code tab). A ringed pl
 | What you see | What it means |
 | --- | --- |
 | The planet's lit phase (full = fresh) | Context window used |
-| The moon orbiting the planet | 5-hour usage limit (top of the orbit = 0%, bottom = 100%) |
-| How much of the ring glows (left-back → front → right-back) | 7-day usage limit |
+| The moon orbiting the planet | 5-hour usage limit: it travels almost a full loop (over the top, across the front, round the bottom); 5 dots mark each hour |
+| How much of the ring glows (left-back → front → right-back) | 7-day usage limit; 7 dots mark each day |
 | Extra stars below the planet | Background tasks running in this session (one star each; they fade out when the task ends) |
 
 Trails turn from blue to amber at 60% and to red at 85%.
 
-Light and dark mode only change the background: pastel nebulae in light mode, deep space in dark mode. A slowly turning spiral galaxy and the occasional shooting star complete the scene.
+Light and dark mode only change the background: pastel nebulae in light mode, deep space in dark mode. A large, slowly turning spiral galaxy disk on the left and frequent shooting stars complete the scene.
 
 ## Install
 

@@ -10,6 +10,6 @@ export type BgTask = { id: string; kind: 'shell' | 'agent' | 'monitor'; startedA
 
 declare module 'claude-code' {
   interface PluginState {
-    'starry-sky': { meter: Meter | null; tasks: BgTask[] }
+    'starry-sky': { meter: Meter | null; tasks: Shaped<BgTask[]> }
   }
 }
