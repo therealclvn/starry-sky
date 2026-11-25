@@ -1,1 +1,1 @@
-{ "name": "starry-sky", "version": "0.11.3", "description": "Cosmos theme with a ringed planet: phase = context, moon = 5-hour limit, ring = 7-day limit; extra stars appear while background tasks run", "types": "./types/index.d.ts" }
+{ "name": "starry-sky", "version": "0.12.0", "description": "Cosmos theme with a ringed planet: phase = context, moon = 5-hour limit, ring = 7-day limit; extra stars appear while background tasks run", "types": "./types/index.d.ts" }

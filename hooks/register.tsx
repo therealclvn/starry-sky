@@ -429,10 +429,12 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 .neb2 { animation-duration: 120s; animation-direction: alternate-reverse; }
 @keyframes drift { from { transform: translate(-40px, 10px); } to { transform: translate(40px, -10px); } }
 .shoot { stroke-width: 2; stroke-linecap: round; opacity: 0; }
-.s1 { animation: shoot1 19s linear infinite; }
-.s2 { animation: shoot2 29s linear infinite; animation-delay: -12s; }
-@keyframes shoot1 { 0% { opacity: 0; transform: translate(900px, 120px); } 1% { opacity: 0.9; } 5% { opacity: 0; transform: translate(560px, 290px); } 100% { opacity: 0; transform: translate(560px, 290px); } }
-@keyframes shoot2 { 0% { opacity: 0; transform: translate(600px, 520px); } 1% { opacity: 0.8; } 4% { opacity: 0; transform: translate(330px, 655px); } 100% { opacity: 0; transform: translate(330px, 655px); } }
+.s1 { animation: shoot1 9s linear infinite; }
+.s2 { animation: shoot2 13s linear infinite; animation-delay: -5s; }
+.s3 { animation: shoot3 17s linear infinite; animation-delay: -11s; }
+@keyframes shoot1 { 0% { opacity: 0; transform: translate(900px, 120px); } 2% { opacity: 0.9; } 11% { opacity: 0; transform: translate(560px, 290px); } 100% { opacity: 0; transform: translate(560px, 290px); } }
+@keyframes shoot2 { 0% { opacity: 0; transform: translate(600px, 520px); } 1.5% { opacity: 0.8; } 8% { opacity: 0; transform: translate(330px, 655px); } 100% { opacity: 0; transform: translate(330px, 655px); } }
+@keyframes shoot3 { 0% { opacity: 0; transform: translate(1080px, 300px); } 1.2% { opacity: 0.85; } 6% { opacity: 0; transform: translate(760px, 460px); } 100% { opacity: 0; transform: translate(760px, 460px); } }
 </style>
 <defs>
 <linearGradient id="space" x1="0" y1="0" x2="0.4" y2="1">
@@ -466,6 +468,7 @@ ${GALAXY}
 ${STATIC}
 <g class="shoot s1"><line x1="0" y1="0" x2="130" y2="-65"/></g>
 <g class="shoot s2"><line x1="0" y1="0" x2="110" y2="-55"/></g>
+<g class="shoot s3"><line x1="0" y1="0" x2="120" y2="-60"/></g>
 ${planet(m)}
 ${bgStars(bg)}
 </svg>`
