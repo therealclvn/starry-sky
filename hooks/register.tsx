@@ -45,7 +45,7 @@ const meter = atom({ plugin: 'starry-sky', key: 'meter' } as const, null)
 // 最近一次狀態更新的時間（毫秒）。重畫時讓循環動畫從這個時間點該播到的位置接著播，而不是從頭開始，避免每次更新都頓一下。
 const stamp = atom({ plugin: 'starry-sky', key: 'stamp' } as const, 0)
 // 加上 shape 標籤：換標籤時舊資料一律當作空的，順便清掉之前漏接結束通知而累積的星星。
-const tasks = atom({ plugin: 'starry-sky', key: 'tasks' } as const, [] as BgTask[], { shape: 'tasks-2' })
+const tasks = atom({ plugin: 'starry-sky', key: 'tasks' } as const, [] as BgTask[], { shape: 'tasks-3' })
 
 // ── 場景 ──
 // 構圖靠右上對齊（xMaxYMin slice）：視窗變窄時裁左邊，變寬時裁底部，右側的用量永遠看得到。
@@ -589,6 +589,16 @@ async function endTasks($: EngineInterface, isDone: (t: BgTask) => boolean): Pro
   }
 }
 
+// 通知裡提到的任務：指令和子代理一收到通知就算結束；監控會在執行中持續發通知，要看到結束字樣才算。
+async function endNotified($: EngineInterface, text: string): Promise<void> {
+  const isEnd = /(completed|failed|killed|stopped|timed?[ _-]?out|error|exited|finished|cancel)/i.test(text)
+  const list = await read($, tasks)
+  if (!list.some(t => t.endedAt === undefined && text.includes(t.id) && (t.kind !== 'monitor' || isEnd))) {
+    return
+  }
+  await endTasks($, t => text.includes(t.id) && (t.kind !== 'monitor' || isEnd))
+}
+
 // 淡出播完後把它拿掉。
 async function pruneEnded($: EngineInterface): Promise<void> {
   try {
@@ -659,13 +669,19 @@ export const register: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // 任務結束的通知：文字裡帶著任務 ID 和結束狀態。
+  // 任務結束的通知：Claude 閒著時會變成一則新訊息（prompt.submit）。
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind === 'task-notification') {
-      // 通知裡提到的任務：指令和子代理一收到通知就算結束；監控會在執行中持續發通知，要看到結束字樣才算。
-      const text = e.text
-      const isEnd = /(completed|failed|killed|stopped|timed?[ _-]?out|error|exited|finished|cancel)/i.test(text)
-      await endTasks($, t => text.includes(t.id) && (t.kind !== 'monitor' || isEnd))
+      await endNotified($, e.text)
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Claude 正在忙時，結束通知是夾在進行中的回合裡送進去的（附件，不會觸發 prompt.submit）；
+  // 子代理自己開的背景指令，通知也走這裡。只看，不改內容。
+  on('prompt.attachment', async ($, e, next) => {
+    if (e.text.includes('task-notification') || e.text.includes('<task-id>') || e.text.includes('<status>')) {
+      await endNotified($, e.text)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
