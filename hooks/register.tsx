@@ -42,6 +42,8 @@ const LOOK: ThemeSetArgs = {
 }
 
 const meter = atom({ plugin: 'starry-sky', key: 'meter' } as const, null)
+// 最近一次狀態更新的時間（毫秒）。重畫時讓循環動畫從這個時間點該播到的位置接著播，而不是從頭開始，避免每次更新都頓一下。
+const stamp = atom({ plugin: 'starry-sky', key: 'stamp' } as const, 0)
 // 加上 shape 標籤：換標籤時舊資料一律當作空的，順便清掉之前漏接結束通知而累積的星星。
 const tasks = atom({ plugin: 'starry-sky', key: 'tasks' } as const, [] as BgTask[], { shape: 'tasks-2' })
 
@@ -61,10 +63,16 @@ function rand(seed: number): () => number {
 const W = 1600
 const H = 1000
 
+// 循環動畫的起始位置：T 是最近一次更新的時間（秒），回傳讓動畫「已經播到那裡」的負延遲。
+function ph(T: number, dur: number, off = 0): string {
+  const p = (((T + off) % dur) + dur) % dur
+  return `${(-p).toFixed(2)}s`
+}
+
 // 不隨用量變動的星星：數量少、顆粒大、亮星帶光暈，避免像螢幕上的灰塵。
-const STATIC = (() => {
+const STAR_LIST = (() => {
   const r = rand(20261125)
-  const out: string[] = []
+  const out: { x: number; y: number; size: number; big: boolean; delay: number; dur: number }[] = []
   for (let i = 0; i < 70; i++) {
     const x = Math.round(r() * W)
     const y = Math.round(r() * H)
@@ -72,17 +80,19 @@ const STATIC = (() => {
     if (x > 1200 && y < 900) continue
     const big = r() < 0.22
     const size = big ? 2.2 + r() * 1.2 : 1.1 + r() * 0.8
-    const delay = (r() * 9).toFixed(1)
-    const dur = (6 + r() * 6).toFixed(1)
-    if (big) {
-      out.push(`<circle class="halo" cx="${x}" cy="${y}" r="${(size * 5).toFixed(1)}"/>`)
-    }
-    out.push(
-      `<circle class="star tw" cx="${x}" cy="${y}" r="${size.toFixed(1)}" style="animation-delay:-${delay}s;animation-duration:${dur}s"/>`,
-    )
+    const delay = Math.round(r() * 90) / 10
+    const dur = Math.round((6 + r() * 6) * 10) / 10
+    out.push({ x, y, size, big, delay, dur })
   }
-  return out.join('\n')
+  return out
 })()
+
+function staticStars(T: number): string {
+  return STAR_LIST.map(st =>
+    (st.big ? `<circle class="halo" cx="${st.x}" cy="${st.y}" r="${(st.size * 5).toFixed(1)}"/>` : '') +
+    `<circle class="star tw" cx="${st.x}" cy="${st.y}" r="${st.size.toFixed(1)}" style="animation-delay:${ph(T, st.dur, st.delay)};animation-duration:${st.dur}s"/>`,
+  ).join('\n')
+}
 
 // 右側一顆行星儀表，不用文字，數值都是連續的：
 // 本體盈缺 = context（用掉越多，陰影越大）
@@ -344,7 +354,7 @@ function hashSeed(id: string, salt: number): number {
   return (h >>> 0) % 2147483647
 }
 
-function bgStars(bg: BgTask[]): string {
+function bgStars(bg: BgTask[], T: number): string {
   const placed: Pt[] = []
   return bg
     .slice(0, 12)
@@ -369,12 +379,12 @@ function bgStars(bg: BgTask[]): string {
           : t.isFresh === true
             ? `animation:bgin ${BG_FADE_IN_MS}ms ease-out forwards`
             : ''
-      return `<g style="${fade}"><g class="bg ${t.kind}" style="animation-delay:-${(i * 0.7).toFixed(1)}s"><circle class="bg-halo" cx="${X}" cy="${Y}" r="26"/><path d="M${x} ${y - L} L${x + k} ${y - k} L${x + L} ${y} L${x + k} ${y + k} L${x} ${y + L} L${x - k} ${y + k} L${x - L} ${y} L${x - k} ${y - k} Z"/><circle cx="${X}" cy="${Y}" r="3"/></g></g>`
+      return `<g style="${fade}"><g class="bg ${t.kind}" style="animation-delay:${ph(T, 3.2, i * 0.7)}"><circle class="bg-halo" cx="${X}" cy="${Y}" r="26"/><path d="M${x} ${y - L} L${x + k} ${y - k} L${x + L} ${y} L${x + k} ${y + k} L${x} ${y + L} L${x - k} ${y + k} L${x - L} ${y} L${x - k} ${y - k} Z"/><circle cx="${X}" cy="${Y}" r="3"/></g></g>`
     })
     .join('')
 }
 
-function buildScene(m: Meter | null, bg: BgTask[]): string {
+function buildScene(m: Meter | null, bg: BgTask[], T: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMaxYMin slice">
 <style>
 .star { fill: #ffffff; opacity: 0.95; }
@@ -415,7 +425,7 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 .b2 { stroke: #eab38c; }
 .ring-shadow { fill: none; stroke: #2a1a2a; stroke-width: 10; opacity: 0.28; }
 .p-atmo { fill: none; stroke: #ffe8d6; stroke-width: 3; opacity: 0.5; }
-.sat { animation: glow 7s ease-in-out infinite; }
+.sat { animation: glow 7s ease-in-out infinite; animation-delay: ${ph(T, 7)}; }
 .p-dark { fill: #1a1d3c; }
 .shade { fill: #0b0d22; opacity: 0.14; }
 .p-rim { fill: none; stroke: #ffffff; stroke-width: 1; opacity: 0.18; }
@@ -470,14 +480,14 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 @keyframes twinkle { 0%, 100% { opacity: 0.95; } 50% { opacity: 0.45; } }
 @keyframes glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.75; } }
 @keyframes turn { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.spin { animation: turn 420s linear infinite; }
-.neb { animation: drift 90s ease-in-out infinite alternate; }
-.neb2 { animation-duration: 120s; animation-direction: alternate-reverse; }
+.spin { animation: turn 420s linear infinite; animation-delay: ${ph(T, 420)}; }
+.neb { animation: drift 90s ease-in-out infinite alternate; animation-delay: ${ph(T, 180)}; }
+.neb2 { animation-duration: 120s; animation-direction: alternate-reverse; animation-delay: ${ph(T, 240)}; }
 @keyframes drift { from { transform: translate(-40px, 10px); } to { transform: translate(40px, -10px); } }
 .shoot { stroke-width: 2; stroke-linecap: round; opacity: 0; }
-.s1 { animation: shoot1 9s linear infinite; }
-.s2 { animation: shoot2 13s linear infinite; animation-delay: -5s; }
-.s3 { animation: shoot3 17s linear infinite; animation-delay: -11s; }
+.s1 { animation: shoot1 9s linear infinite; animation-delay: ${ph(T, 9)}; }
+.s2 { animation: shoot2 13s linear infinite; animation-delay: ${ph(T, 13, 5)}; }
+.s3 { animation: shoot3 17s linear infinite; animation-delay: ${ph(T, 17, 11)}; }
 @keyframes shoot1 { 0% { opacity: 0; transform: translate(900px, 120px); } 2% { opacity: 0.9; } 11% { opacity: 0; transform: translate(560px, 290px); } 100% { opacity: 0; transform: translate(560px, 290px); } }
 @keyframes shoot2 { 0% { opacity: 0; transform: translate(600px, 520px); } 1.5% { opacity: 0.8; } 8% { opacity: 0; transform: translate(330px, 655px); } 100% { opacity: 0; transform: translate(330px, 655px); } }
 @keyframes shoot3 { 0% { opacity: 0; transform: translate(1080px, 300px); } 1.2% { opacity: 0.85; } 6% { opacity: 0; transform: translate(760px, 460px); } 100% { opacity: 0; transform: translate(760px, 460px); } }
@@ -513,12 +523,12 @@ function buildScene(m: Meter | null, bg: BgTask[]): string {
 <g class="neb"><ellipse cx="1150" cy="300" rx="420" ry="220" transform="rotate(-30 1150 300)" fill="url(#neb2)"/></g>
 <g class="neb neb2"><ellipse cx="300" cy="820" rx="460" ry="200" fill="url(#neb4)"/></g>
 ${GALAXY}
-${STATIC}
+${staticStars(T)}
 <g class="shoot s1"><line x1="0" y1="0" x2="130" y2="-65"/></g>
 <g class="shoot s2"><line x1="0" y1="0" x2="110" y2="-55"/></g>
 <g class="shoot s3"><line x1="0" y1="0" x2="120" y2="-60"/></g>
 ${planet(m)}
-${bgStars(bg)}
+${bgStars(bg, T)}
 </svg>`
 }
 
@@ -535,8 +545,15 @@ function toMeter(context: SessionContextUsage, rateLimits: SessionRateLimit[]): 
 
 // ── 背景任務追蹤：啟動時從工具結果拿到 ID；結束時（任務通知、TaskStop、子代理清單）先標記結束讓星星淡出，再移除。
 // 這些都要是檔案最上層的函式宣告，引擎才肯讓 $ 傳進來。
+// 記下更新時間：要在改用量或任務之前先寫，接下來的重畫就會用到新的時間。
+async function touch($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  await update($, stamp, () => now)
+}
+
 async function addTask($: EngineInterface, id: string, kind: BgTask['kind']): Promise<void> {
   const now = await $.clock.now()
+  await touch($)
   await update($, tasks, list => [...list.filter(x => x.id !== id), { id, kind, startedAt: now, isFresh: true }])
   void clearFresh($, id)
 }
@@ -545,6 +562,7 @@ async function addTask($: EngineInterface, id: string, kind: BgTask['kind']): Pr
 async function clearFresh($: EngineInterface, id: string): Promise<void> {
   try {
     await $.clock.sleep(BG_FADE_IN_MS + 200)
+    await touch($)
     await update($, tasks, list => list.map(x => (x.id === id ? { ...x, isFresh: false } : x)))
   } catch {
     // 下次加入時會重設。
@@ -554,6 +572,7 @@ async function clearFresh($: EngineInterface, id: string): Promise<void> {
 async function endTasks($: EngineInterface, isDone: (t: BgTask) => boolean): Promise<void> {
   const now = await $.clock.now()
   let changed = false
+  await touch($)
   await update($, tasks, list =>
     list
       .filter(x => x.endedAt === undefined || now - x.endedAt < BG_FADE_OUT_MS + 400)
@@ -575,6 +594,7 @@ async function pruneEnded($: EngineInterface): Promise<void> {
   try {
     await $.clock.sleep(BG_FADE_OUT_MS + 300)
     const later = await $.clock.now()
+    await touch($)
     await update($, tasks, list => list.filter(x => x.endedAt === undefined || later - x.endedAt < BG_FADE_OUT_MS))
   } catch {
     // 下一次更新時也會清掉。
@@ -594,6 +614,7 @@ export const register: Register = on => {
     // 清掉舊資料：已結束的、舊格式的、超過 12 小時還掛著的（多半是漏接結束通知）。
     try {
       const now = await $.clock.now()
+      await touch($)
       await update($, tasks, list =>
         (list ?? []).filter(x => typeof x.startedAt === 'number' && x.endedAt === undefined && now - x.startedAt < 12 * 3600 * 1000).map(x => ({ ...x, isFresh: false })),
       )
@@ -602,6 +623,7 @@ export const register: Register = on => {
     }
     try {
       const usage = await $.session.usage()
+      await touch($)
       await update($, meter, () => toMeter(usage.context, usage.rateLimits))
     } catch (error) {
       $.ui.log(`starry-sky: usage unavailable: ${String(error)}`)
@@ -610,6 +632,7 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    await touch($)
     await update($, meter, () => toMeter(e.context, e.rateLimits))
     return next(e)
   })
@@ -680,7 +703,8 @@ export const register: Register = on => {
     }
     const m = await read($, meter)
     const bg = await read($, tasks)
+    const T = (await read($, stamp)) / 1000
     const { Svg } = $.ui.resolve(e)
-    return <Svg source={buildScene(m, bg)} alt="Deep space with a ringed planet. Its lit phase shows context used, its orbiting moon shows the 5-hour limit, and how much of its ring glows shows the 7-day limit. Extra bright stars near the planet appear only while background tasks are running." />
+    return <Svg source={buildScene(m, bg, T)} alt="Deep space with a ringed planet. Its lit phase shows context used, its orbiting moon shows the 5-hour limit, and how much of its ring glows shows the 7-day limit. Extra bright stars near the planet appear only while background tasks are running." />
   })
 }
